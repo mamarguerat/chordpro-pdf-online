@@ -13,6 +13,65 @@
       />
 
       <fieldset>
+        <legend>Import</legend>
+
+        <div>
+          <label for="jem-song-number">JEM song number:</label>
+          <div class="jem-import-row">
+            <input
+              id="jem-song-number"
+              type="text"
+              v-model="jemSongNumber"
+              placeholder=""
+            >
+            <button
+              @click="onImportJemSong()"
+              type="button"
+              class="jem-import-button"
+            >
+              Import JEM
+            </button>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="headings-fieldset">
+        <legend>Headings</legend>
+
+        <div
+          v-for="field in metadataFields"
+          :key="field"
+          :class="[
+            'heading-field',
+            { 'heading-field--compact': field === 'tempo' || field === 'key' },
+          ]"
+        >
+          <label :for="`heading-${field}`">{{ metadataLabels[field] }}:</label>
+          <template v-if="field === 'time'">
+            <select
+              :id="`heading-${field}`"
+              v-model="selectedTimeSignature"
+            >
+              <option value="">Select time signature</option>
+              <option
+                v-for="signature in commonTimeSignatures"
+                :key="signature"
+                :value="signature"
+              >
+                {{ signature }}
+              </option>
+            </select>
+          </template>
+          <input
+            v-else
+            :id="`heading-${field}`"
+            type="text"
+            v-model="headingValues[field]"
+          >
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Settings</legend>
 
         <div>
@@ -87,6 +146,10 @@
         </button>			
       </fieldset>
     </form>
+    <p
+      v-if="loadingError"
+      class="import-error no-print"
+    >{{ loadingError }}</p>
     <LoaderBars
       style="margin: 0 auto; "
       v-if="isLoading"
@@ -108,15 +171,34 @@
 
 <script setup>
 const DEFAULT_FONT_SIZE = 12;
-import { computed, inject, defineAsyncComponent, provide, ref, watch } from 'vue';
+import { computed, inject, defineAsyncComponent, provide, reactive, ref, watch } from 'vue';
 const ChordChart = defineAsyncComponent(() => import('../components/ChordChart.vue'));
 const LoaderBars = defineAsyncComponent(() => import('../components/LoaderBars.vue'));
 const input = inject('chordProInput');
 const isLoading = inject('isLoading');
+const loadingError = inject('loadingError');
+const importJemSongByNumber = inject('importJemSongByNumber');
+
+const metadataFields = ['title', 'artist', 'time', 'key', 'subtitle', 'copyright', 'footer', 'tempo'];
+const metadataLabels = {
+  title: 'Title',
+  artist: 'Artist',
+  subtitle: 'Subtitle',
+  key: 'Key',
+  time: 'Time',
+  tempo: 'Tempo',
+  copyright: 'Copyright',
+  footer: 'Footer',
+};
+const commonTimeSignatures = ['2/4', '3/4', '4/4', '6/8', '12/8'];
 
 const caretPosition = ref(0);
-const columns = ref(1);
+const columns = ref(2);
 const fontSize = ref(DEFAULT_FONT_SIZE);
+const headingValues = reactive(createEmptyHeadingValues());
+const isHydratingHeadingValues = ref(false);
+const jemSongNumber = ref('');
+const selectedTimeSignature = ref('');
 const textareaRef = ref(null);
 const transposition = ref(0);
 
@@ -124,6 +206,28 @@ provide('caretPosition', caretPosition);
 
 watch(input, () => {
   caretPosition.value = getCaretPosition();
+  hydrateHeadingValuesFromInput();
+}, { immediate: true });
+
+watch(() => metadataFields.map((field) => headingValues[field]).join('\u0001'), () => {
+  if (isHydratingHeadingValues.value) {
+    return;
+  }
+
+  const updatedInput = rewriteInputHeadingDirectives(input.value || '');
+  if (updatedInput !== input.value) {
+    input.value = updatedInput;
+  }
+});
+
+watch(() => headingValues.time, () => {
+  syncTimeSignatureInputs();
+}, { immediate: true });
+
+watch(selectedTimeSignature, (newValue) => {
+  if (newValue !== headingValues.time) {
+    headingValues.time = newValue;
+  }
 });
 
 const validatedFontSize = computed(() => {
@@ -139,7 +243,7 @@ const validatedTransposition = computed(() => {
 });
 
 function getCaretPosition() {
-  return textareaRef.value.selectionStart;
+  return textareaRef.value ? textareaRef.value.selectionStart : 0;
 }
 
 function onChordChartClick(event) {
@@ -147,10 +251,164 @@ function onChordChartClick(event) {
   if (closestElementWithIndex) {
     const index = parseInt(closestElementWithIndex.getAttribute('data-index'), 10);
     caretPosition.value = index;
-    textareaRef.value.setSelectionRange(caretPosition.value, caretPosition.value);
+    if (textareaRef.value) {
+      textareaRef.value.setSelectionRange(caretPosition.value, caretPosition.value);
+    }
   }
-  textareaRef.value.focus();
+  if (textareaRef.value) {
+    textareaRef.value.focus();
+  }
 };
+
+async function onImportJemSong() {
+  if (!importJemSongByNumber) {
+    return;
+  }
+
+  jemSongNumber.value = normalizeJemSongNumber(jemSongNumber.value);
+
+  try {
+    await importJemSongByNumber(jemSongNumber.value);
+  } catch {
+    // Error message is set by App.vue and displayed via loadingError.
+  }
+}
+
+function normalizeJemSongNumber(songNumber) {
+  const trimmedSongNumber = `${songNumber || ''}`.trim();
+  if (!trimmedSongNumber) {
+    return '';
+  }
+
+  if (/^[0-9]+$/.test(trimmedSongNumber)) {
+    return trimmedSongNumber.padStart(3, '0');
+  }
+
+  return trimmedSongNumber;
+}
+
+function createEmptyHeadingValues() {
+  return {
+    title: '',
+    artist: '',
+    subtitle: '',
+    key: '',
+    time: '',
+    tempo: '',
+    copyright: '',
+    footer: '',
+  };
+}
+
+function parseHeadingValuesFromInput(chordPro) {
+  const parsedValues = createEmptyHeadingValues();
+  const lines = `${chordPro || ''}`.split(/\r?\n/);
+
+  for (const line of lines) {
+    const parsedDirective = parseDirectiveLine(line);
+    if (!parsedDirective) {
+      continue;
+    }
+
+    const { name, value } = parsedDirective;
+    if (Object.hasOwn(parsedValues, name) && !parsedValues[name]) {
+      parsedValues[name] = value;
+    }
+  }
+
+  return parsedValues;
+}
+
+function parseDirectiveLine(line) {
+  const match = line.match(/^\s*\{([^}\s:]+)\s*(?::\s*|\s+)?([^}]*)\}\s*$/);
+  if (!match) {
+    return null;
+  }
+
+  const directiveName = `${match[1] || ''}`.toLowerCase();
+  const directiveValue = (match[2] || '').trim();
+
+  return {
+    name: toCanonicalDirectiveName(directiveName, directiveValue),
+    value: directiveValue,
+  };
+}
+
+function toCanonicalDirectiveName(name, value) {
+  if (name === 't') {
+    return 'title';
+  }
+
+  if (name === 'st') {
+    return 'subtitle';
+  }
+
+  if (name === 'k') {
+    return 'key';
+  }
+
+  if (name === 'c' || name === 'comment') {
+    if (/^(©|\(c\)|copyright\b)/i.test(value)) {
+      return 'copyright';
+    }
+    return 'comment';
+  }
+
+  return name;
+}
+
+function isHeadingDirectiveLine(line) {
+  const parsedDirective = parseDirectiveLine(line);
+  return !!parsedDirective && metadataFields.includes(parsedDirective.name);
+}
+
+function rewriteInputHeadingDirectives(chordPro) {
+  const lines = `${chordPro || ''}`.split(/\r?\n/);
+  const bodyLines = lines.filter((line) => !isHeadingDirectiveLine(line));
+
+  while (bodyLines.length > 0 && bodyLines[0].trim() === '') {
+    bodyLines.shift();
+  }
+
+  const headingDirectiveLines = metadataFields
+    .filter((field) => headingValues[field])
+    .map((field) => `{${field}: ${headingValues[field]}}`);
+
+  if (headingDirectiveLines.length === 0) {
+    return bodyLines.join('\n');
+  }
+
+  if (bodyLines.length === 0) {
+    return headingDirectiveLines.join('\n');
+  }
+
+  return `${headingDirectiveLines.join('\n')}\n\n${bodyLines.join('\n')}`;
+}
+
+function hydrateHeadingValuesFromInput() {
+  isHydratingHeadingValues.value = true;
+  const parsedValues = parseHeadingValuesFromInput(input.value || '');
+  metadataFields.forEach((field) => {
+    headingValues[field] = parsedValues[field];
+  });
+  isHydratingHeadingValues.value = false;
+}
+
+function syncTimeSignatureInputs() {
+  const timeValue = `${headingValues.time || ''}`.trim();
+
+  if (!timeValue) {
+    selectedTimeSignature.value = '';
+    return;
+  }
+
+  if (commonTimeSignatures.includes(timeValue)) {
+    selectedTimeSignature.value = timeValue;
+    return;
+  }
+
+  selectedTimeSignature.value = '';
+}
 
 function onPlay() {
 	const song = document.getElementById("chordpro-input").value;
@@ -255,6 +513,56 @@ fieldset {
   > * {
     flex: 1;
   }
+}
+
+.headings-fieldset {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(120px, 0.65fr);
+  align-items: end;
+}
+
+.headings-fieldset legend {
+  grid-column: 1 / -1;
+}
+
+.heading-field {
+  min-width: 0;
+}
+
+.heading-field--compact {
+  grid-column: 4;
+}
+
+.headings-fieldset input,
+.headings-fieldset select {
+  width: 100%;
+}
+
+@media screen and (max-width: 875px) {
+  .headings-fieldset {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .heading-field--compact {
+    grid-column: auto;
+  }
+}
+
+@media screen and (max-width: 576px) {
+  .headings-fieldset {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.jem-import-row {
+  display: flex;
+  gap: 8px;
+}
+
+.import-error {
+  color: #b00020;
+  font-weight: bold;
+  margin: 8px 0;
 }
 
 .print-view {

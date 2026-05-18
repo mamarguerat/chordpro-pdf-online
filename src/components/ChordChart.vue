@@ -6,6 +6,10 @@
       class="chordchart-artist"
     >{{ artist }}</p>
     <p
+      v-if="subtitle"
+      class="chordchart-subtitle"
+    >{{ subtitle }}</p>
+    <p
       v-if="key || tempo || time"
       class="chordchart-metadata-line"
     >
@@ -38,8 +42,8 @@
         :paragraph="paragraph"
       />
     </div>
-    <footer v-if="copyright">
-      <p>{{ copyright }}</p>
+    <footer v-if="footerText">
+      <p>{{ footerText }}</p>
     </footer>
   </section>
 </template>
@@ -69,7 +73,10 @@ const metadata = computed(() => song.value.metadata);
 const artist = computed(() => metadata.value.get('artist'));
 const bodyParagraphs = computed(() => song.value.bodyParagraphs);
 const copyright = computed(() => metadata.value.get('copyright'));
+const footer = computed(() => metadata.value.get('footer'));
+const footerText = computed(() => footer.value || copyright.value);
 const key = computed(() => metadata.value.get('key'));
+const subtitle = computed(() => metadata.value.get('subtitle'));
 const tempo = computed(() => metadata.value.get('tempo'));
 const time = computed(() => metadata.value.get('time'));
 const title = computed(() => metadata.value.get('title'));
@@ -98,6 +105,10 @@ h1 {
 }
 
 .chordchart-artist {
+  font-size: .7em;
+}
+
+.chordchart-subtitle {
   font-size: .7em;
 }
 
