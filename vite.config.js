@@ -5,7 +5,7 @@ import vue from '@vitejs/plugin-vue'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: "/orinayo/chordpro-pdf-online/",
+  base: "/chordpro-pdf-online/",
   plugins: [
     vue(),
   ],
