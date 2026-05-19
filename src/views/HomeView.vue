@@ -171,7 +171,8 @@
 
 <script setup>
 const DEFAULT_FONT_SIZE = 12;
-import { computed, inject, defineAsyncComponent, provide, reactive, ref, watch } from 'vue';
+import { computed, inject, defineAsyncComponent, onBeforeUnmount, provide, reactive, ref, watch } from 'vue';
+import { Key } from 'chordsheetjs';
 const ChordChart = defineAsyncComponent(() => import('../components/ChordChart.vue'));
 const LoaderBars = defineAsyncComponent(() => import('../components/LoaderBars.vue'));
 const input = inject('chordProInput');
@@ -201,6 +202,7 @@ const jemSongNumber = ref('');
 const selectedTimeSignature = ref('');
 const textareaRef = ref(null);
 const transposition = ref(0);
+const defaultDocumentTitle = document.title;
 
 provide('caretPosition', caretPosition);
 
@@ -228,6 +230,15 @@ watch(selectedTimeSignature, (newValue) => {
   if (newValue !== headingValues.time) {
     headingValues.time = newValue;
   }
+});
+
+watch(() => `${headingValues.title}\u0001${headingValues.key}\u0001${jemSongNumber.value}\u0001${validatedTransposition.value}`, () => {
+  const pdfTitle = buildPdfDocumentTitle();
+  document.title = pdfTitle || defaultDocumentTitle;
+}, { immediate: true });
+
+onBeforeUnmount(() => {
+  document.title = defaultDocumentTitle;
 });
 
 const validatedFontSize = computed(() => {
@@ -285,6 +296,67 @@ function normalizeJemSongNumber(songNumber) {
   }
 
   return trimmedSongNumber;
+}
+
+function getJemSongNumberFromTitle(titleText) {
+  const titleMatch = `${titleText || ''}`.match(/^JEM\s+([^\s-]+)\s*-\s+/i);
+  if (!titleMatch) {
+    return '';
+  }
+
+  return normalizeJemSongNumber(titleMatch[1]);
+}
+
+function stripJemPrefixFromTitle(titleText) {
+  return `${titleText || ''}`
+    .replace(/^JEM\s+[^\s-]+\s*-\s+/i, '')
+    .trim();
+}
+
+function sanitizeFilenamePart(value) {
+  const cleanedValue = `${value || ''}`
+    .replace(/[<>:"/\\|?*]/g, '-')
+    .split('')
+    .map((character) => (character.charCodeAt(0) < 32 ? '-' : character))
+    .join('');
+
+  return cleanedValue
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildPdfDocumentTitle() {
+  const normalizedTitle = sanitizeFilenamePart(stripJemPrefixFromTitle(headingValues.title));
+  const transposedKey = getTransposedKey(headingValues.key, validatedTransposition.value);
+  const normalizedKey = sanitizeFilenamePart(transposedKey);
+  const normalizedJemNumber = normalizeJemSongNumber(jemSongNumber.value) || getJemSongNumberFromTitle(headingValues.title);
+
+  const prefixParts = ['JEM', normalizedJemNumber, normalizedKey].filter((part) => part);
+  const prefix = prefixParts.join('-');
+
+  if (!prefix) {
+    return normalizedTitle;
+  }
+
+  if (!normalizedTitle) {
+    return prefix;
+  }
+
+  return `${prefix} - ${normalizedTitle}`;
+}
+
+function getTransposedKey(keyText, delta) {
+  const normalizedKey = `${keyText || ''}`.trim();
+  if (!normalizedKey) {
+    return '';
+  }
+
+  const parsedKey = Key.parse(normalizedKey);
+  if (!parsedKey) {
+    return normalizedKey;
+  }
+
+  return parsedKey.transpose(delta).toString();
 }
 
 function createEmptyHeadingValues() {
@@ -416,16 +488,20 @@ function onPlay() {
 	window.parent.postMessage(song, "*");
 }
 
+function getDefaultExportFilename() {
+  return buildPdfDocumentTitle() || 'chord-chart';
+}
+
 function onSave() {
 	console.debug("Save chordpro file");
-	const choFilename = prompt("Enter filename");
+  const choFilename = prompt("Enter filename", getDefaultExportFilename());
 	
 	if (choFilename) {
 		const blob = new Blob([document.getElementById("chordpro-input").value], { type: 'text/plain' }); 	
 		const anchor = document.createElement('a');
 		anchor.href = window.URL.createObjectURL(blob);
 		anchor.style = "display: none;";
-		anchor.download = choFilename + ".cho";
+    anchor.download = `${sanitizeFilenamePart(choFilename) || getDefaultExportFilename()}.cho`;
 		document.body.appendChild(anchor);
 		anchor.click();
 		window.URL.revokeObjectURL(anchor.href); 
@@ -436,7 +512,7 @@ function onSave() {
 	
 async function onMidi() {
 	console.debug("Generate Midi file");
-	const midiFilename = prompt("Enter filename");
+  const midiFilename = prompt("Enter filename", getDefaultExportFilename());
 	
 	if (midiFilename) {
 		const url = "/orinayo/cp2midi";
@@ -445,7 +521,7 @@ async function onMidi() {
 		const anchor = document.createElement('a');
 		anchor.href = window.URL.createObjectURL(blob);
 		anchor.style = "display: none;";
-		anchor.download = midiFilename + ".mid";
+    anchor.download = `${sanitizeFilenamePart(midiFilename) || getDefaultExportFilename()}.mid`;
 		document.body.appendChild(anchor);
 		anchor.click();
 		window.URL.revokeObjectURL(anchor.href);
