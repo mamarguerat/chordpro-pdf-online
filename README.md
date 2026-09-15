@@ -17,16 +17,23 @@ The app tries a direct request first, then falls back to public CORS proxies
 (HTTP errors, JSON or HTML error pages returned by a proxy) are skipped instead of
 being imported as song content.
 
-`corsproxy.io` no longer serves anonymous legacy URLs and now requires an API key,
-so it is only used when one is configured. To enable it, set `VITE_CORSPROXY_API_KEY`
-in a `.env` file (or in the build environment):
+`corsproxy.io` no longer serves the anonymous legacy `?<url>` form. Its modern keyless
+`?url=<url>` form is still used as a last resort — it is accepted from `github.io`
+origins, which covers this GitHub Pages deployment, but it is rate limited.
 
-```
-VITE_CORSPROXY_API_KEY=your-corsproxy-api-key
-```
+An API key is optional and only raises those limits (plus dashboard analytics). To use
+one, get it from <https://console.corsproxy.io/> and expose it to the build as
+`VITE_CORSPROXY_API_KEY`:
 
-Keys are issued at <https://console.corsproxy.io/>. Note that the value is embedded in
-the built static bundle, so only use a key you are willing to expose publicly.
+- locally, in a `.env` file: `VITE_CORSPROXY_API_KEY=your-corsproxy-api-key`
+- for the GitHub Pages deploy, as a repository secret of the same name
+  (Settings → Secrets and variables → Actions → New repository secret). The
+  `Deploy App` workflow already passes it to `npm run build`, and builds fine when
+  the secret is absent.
+
+Vite inlines `VITE_*` values into the built bundle, so this key is publicly readable on
+the deployed site. Restrict it by origin in the corsproxy console and treat it as a
+quota token, not a secret.
 
 ## Heading textboxes
 

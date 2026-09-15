@@ -110,8 +110,9 @@ function buildJemFetchAttempts(jemUrl) {
     () => fetch(`https://api.codetabs.com/v1/proxy/?quest=${encodedJemUrl}`),
   ];
 
-  // corsproxy.io dropped anonymous legacy URLs: it only answers requests that
-  // carry an API key, so this attempt is added only when a key is configured.
+  // corsproxy.io dropped the anonymous legacy `?<url>` form. Its keyed API is
+  // used first when a key is configured, and the keyless `?url=` form stays as
+  // a last resort: it is accepted from github.io origins but rate limited.
   const corsProxyApiKey = `${import.meta.env.VITE_CORSPROXY_API_KEY || ''}`.trim();
   if (corsProxyApiKey) {
     attempts.push(() =>
@@ -120,6 +121,7 @@ function buildJemFetchAttempts(jemUrl) {
       ),
     );
   }
+  attempts.push(() => fetch(`https://corsproxy.io/?url=${encodedJemUrl}`));
 
   return attempts;
 }
