@@ -12,6 +12,22 @@ JEM import URL pattern used by the app:
 
 If a JEM import fails (including potential CORS restrictions), the app shows an error and does not auto-fallback to sample content.
 
+The app tries a direct request first, then falls back to public CORS proxies
+(`api.allorigins.win`, `api.codetabs.com`). Responses that are not valid ChordPro
+(HTTP errors, JSON or HTML error pages returned by a proxy) are skipped instead of
+being imported as song content.
+
+`corsproxy.io` no longer serves anonymous legacy URLs and now requires an API key,
+so it is only used when one is configured. To enable it, set `VITE_CORSPROXY_API_KEY`
+in a `.env` file (or in the build environment):
+
+```
+VITE_CORSPROXY_API_KEY=your-corsproxy-api-key
+```
+
+Keys are issued at <https://console.corsproxy.io/>. Note that the value is embedded in
+the built static bundle, so only use a key you are willing to expose publicly.
+
 ## Heading textboxes
 
 The settings panel extracts and allows editing these ChordPro directives:
