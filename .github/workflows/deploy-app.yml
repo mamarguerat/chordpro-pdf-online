@@ -13,6 +13,9 @@ jobs:
       - run: npm run build
         env:
           VITE_GOOGLE_API_KEY: ${{ secrets.VITE_GOOGLE_API_KEY }}
+          # Optional: raises the corsproxy.io limits used by the JEM import.
+          # Builds fine when the secret is unset, falling back to keyless proxies.
+          VITE_CORSPROXY_API_KEY: ${{ secrets.VITE_CORSPROXY_API_KEY }}
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3.0.1
         with: 
