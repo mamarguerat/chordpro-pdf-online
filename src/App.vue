@@ -100,28 +100,66 @@ function normalizeJemSongNumber(songNumber) {
   return trimmedSongNumber;
 }
 
-async function fetchJemChordProText(jemUrl) {
-  const fetchAttempts = [
+function buildJemFetchAttempts(jemUrl) {
+  const encodedJemUrl = encodeURIComponent(jemUrl);
+  const attempts = [
     // Direct request first for environments where CORS is already allowed.
     () => fetch(jemUrl),
     // Public fallback proxies for static deployments without a backend.
-    () => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(jemUrl)}`),
-    () => fetch(`https://corsproxy.io/?${encodeURIComponent(jemUrl)}`),
+    () => fetch(`https://api.allorigins.win/raw?url=${encodedJemUrl}`),
+    () => fetch(`https://api.codetabs.com/v1/proxy/?quest=${encodedJemUrl}`),
   ];
 
+  // corsproxy.io dropped anonymous legacy URLs: it only answers requests that
+  // carry an API key, so this attempt is added only when a key is configured.
+  const corsProxyApiKey = `${import.meta.env.VITE_CORSPROXY_API_KEY || ''}`.trim();
+  if (corsProxyApiKey) {
+    attempts.push(() =>
+      fetch(
+        `https://corsproxy.io/?key=${encodeURIComponent(corsProxyApiKey)}&url=${encodedJemUrl}`,
+      ),
+    );
+  }
+
+  return attempts;
+}
+
+function isChordProResponseBody(contentType, text) {
+  const normalizedContentType = `${contentType || ''}`.toLowerCase();
+  if (normalizedContentType.includes('json') || normalizedContentType.includes('html')) {
+    return false;
+  }
+
+  // Proxy failures answer with a JSON payload or an HTML error page. A ChordPro
+  // file may start with a `{title: ...}` directive, so only JSON-looking and
+  // markup-looking bodies are rejected here.
+  const trimmedText = text.trim();
+  return !/^(<|\[|\{\s*")/.test(trimmedText);
+}
+
+async function fetchJemChordProText(jemUrl) {
   let lastError = null;
 
-  for (const attempt of fetchAttempts) {
+  for (const attempt of buildJemFetchAttempts(jemUrl)) {
     try {
       const response = await attempt();
-      const text = await response.text();
-      if (text.trim()) {
-        return text;
-      }
-
       if (!response.ok) {
         lastError = new Error(`JEM import failed with status ${response.status}`);
+        continue;
       }
+
+      const text = await response.text();
+      if (!text.trim()) {
+        lastError = new Error('JEM import returned an empty response body');
+        continue;
+      }
+
+      if (!isChordProResponseBody(response.headers?.get?.('content-type'), text)) {
+        lastError = new Error('JEM import returned a non-ChordPro response body');
+        continue;
+      }
+
+      return text;
     } catch (error) {
       lastError = error;
     }
